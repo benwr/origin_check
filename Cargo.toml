@@ -1,6 +1,6 @@
 [package]
 name = "origin_check"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["Ben Weinstein-Raun <b@w-r.me>"]
 edition = "2021"
 description = "A minimal Tower middleware layer for mitigating CSRF attacks"

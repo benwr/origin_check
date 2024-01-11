@@ -3,7 +3,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use http::{method::Method, HeaderValue, Request, Uri, uri::Scheme};
+use http::{method::Method, uri::Scheme, HeaderValue, Request, Uri};
 use pin_project::pin_project;
 use tower::{BoxError, Service};
 
@@ -92,7 +92,9 @@ fn get_exactly_one_uri_header<B>(
         Err(_) => return Err(OriginCheckError::InvalidHeader((*header).clone())),
     };
     let uri = match header_str.parse::<Uri>() {
-        Err(_) => return Err(OriginCheckError::InvalidUri(header_str.to_string())),
+        Err(_) => {
+            return Err(OriginCheckError::InvalidUri(header_str.to_string()));
+        }
         Ok(r) => r,
     };
     Ok(uri)
@@ -102,8 +104,8 @@ fn is_valid_origin_header(uri: &Uri) -> bool {
     match (uri.scheme(), uri.authority()) {
         (Some(scheme), Some(authority)) => {
             let minimal_origin = match authority.port_u16() {
-                None => format!("{}://{}", scheme, authority.host()),
-                Some(p) => format!("{}://{}:{}", scheme, authority.host(), p),
+                None => format!("{}://{}/", scheme, authority.host()),
+                Some(p) => format!("{}://{}:{}/", scheme, authority.host(), p),
             };
             uri.to_string() == minimal_origin
         }
@@ -116,12 +118,22 @@ fn potentially_trustworthy(uri: &Uri) -> bool {
     use std::str::FromStr;
     if uri.scheme() == Some(&Scheme::HTTPS) {
         // We don't accept wss:// or file:// schemes, because they seem sketchy in this context
+        // (also I think they don't even parse as uris according to `http`)
         return true;
     }
-    let host = match uri.host() {
+    let mut host = match uri.host() {
         None => return false,
         Some(h) => h,
     };
+    if ["localhost", "localhost."].contains(&host)
+        || host.ends_with(".localhost")
+        || host.ends_with(".localhost.")
+    {
+        return true;
+    }
+    if host.starts_with("[") && host.ends_with("]") {
+        host = host.strip_prefix("[").unwrap().strip_suffix("]").unwrap();
+    }
     if let Ok(i) = std::net::Ipv4Addr::from_str(host) {
         let local_net = cidr::Ipv4Cidr::from_str("127.0.0.0/8").unwrap();
         if local_net.contains(&i) {
@@ -133,12 +145,6 @@ fn potentially_trustworthy(uri: &Uri) -> bool {
         if local_net.contains(&i) {
             return true;
         }
-    }
-    if ["localhost", "localhost."].contains(&host) {
-        return true;
-    }
-    if host.ends_with(".localhost") || host.ends_with(".localhost.") {
-        return true;
     }
 
     false
@@ -210,5 +216,172 @@ where
             Ok(()) => ResponseFuture::Ok(self.inner.call(request)),
             Err(e) => ResponseFuture::Err(e),
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use http::Request;
+    #[test]
+    fn get_request_always_allowed() {
+        let req = Request::builder().uri("/foo").body("").unwrap();
+        validate_request(&req).unwrap();
+        let req = Request::builder()
+            .uri("/foo")
+            .method("POST")
+            .body("")
+            .unwrap();
+        assert!(validate_request(&req).is_err());
+
+        let req = Request::builder()
+            .uri("https://google.com/foo")
+            .method("GET")
+            .body("")
+            .unwrap();
+        validate_request(&req).unwrap();
+        let req = Request::builder()
+            .uri("https://google.com/foo")
+            .method("PUT")
+            .body("")
+            .unwrap();
+        assert!(validate_request(&req).is_err());
+    }
+
+    #[test]
+    fn origin_header_suffices() {
+        let req = Request::builder()
+            .uri("/foo")
+            .method("PUT")
+            .header("Host", "google.com")
+            .header("Origin", "https://google.com")
+            .body("")
+            .unwrap();
+        validate_request(&req).unwrap();
+        let req = Request::builder()
+            .uri("/foo")
+            .method("PUT")
+            .header("Host", "google.com")
+            .header("Origin", "https://foo.google.com")
+            .body("")
+            .unwrap();
+        assert!(validate_request(&req).is_err());
+        let req = Request::builder()
+            .uri("/foo")
+            .method("PUT")
+            .header("Host", "google.com")
+            .header("Origin", "http://google.com")
+            .body("")
+            .unwrap();
+        assert!(validate_request(&req).is_err());
+        let req = Request::builder()
+            .uri("/foo")
+            .method("PUT")
+            .header("Host", "localhost")
+            .header("Origin", "http://google.com")
+            .body("")
+            .unwrap();
+        assert!(validate_request(&req).is_err());
+    }
+
+    #[test]
+    fn referer_header_suffices() {
+        let req = Request::builder()
+            .uri("/foo")
+            .method("PUT")
+            .header("Host", "google.com")
+            .header("Referer", "https://google.com")
+            .body("")
+            .unwrap();
+        validate_request(&req).unwrap();
+        let req = Request::builder()
+            .uri("/foo")
+            .method("PUT")
+            .header("Host", "google.com")
+            .header("Referer", "https://google.com/alsfdkj")
+            .body("")
+            .unwrap();
+        validate_request(&req).unwrap();
+        let req = Request::builder()
+            .uri("/foo")
+            .method("PUT")
+            .header("Host", "google.com")
+            .header("Referer", "https://google.com/askn?in=40")
+            .body("")
+            .unwrap();
+        validate_request(&req).unwrap();
+        let req = Request::builder()
+            .uri("/foo")
+            .method("PUT")
+            .header("Host", "google.com")
+            .header("Referer", "https://foo.google.com")
+            .body("")
+            .unwrap();
+        assert!(validate_request(&req).is_err());
+        let req = Request::builder()
+            .uri("/foo")
+            .method("PUT")
+            .header("Host", "google.com")
+            .header("Referer", "http://google.com")
+            .body("")
+            .unwrap();
+        assert!(validate_request(&req).is_err());
+        let req = Request::builder()
+            .uri("/foo")
+            .method("PUT")
+            .header("Host", "localhost")
+            .header("Referer", "http://google.com")
+            .body("")
+            .unwrap();
+        assert!(validate_request(&req).is_err());
+    }
+
+    #[test]
+    fn multiple_headers_fail() {
+        let req = Request::builder()
+            .uri("/foo")
+            .method("PUT")
+            .header("Host", "google.com")
+            .header("Referer", "https://google.com")
+            .header("Referer", "https://google.com")
+            .body("")
+            .unwrap();
+        assert!(validate_request(&req).is_err());
+        let req = Request::builder()
+            .uri("/foo")
+            .method("PUT")
+            .header("Host", "google.com")
+            .header("Origin", "https://google.com")
+            .header("Origin", "https://google.com")
+            .body("")
+            .unwrap();
+        assert!(validate_request(&req).is_err());
+    }
+
+    #[test]
+    fn trustworthy_contexts() {
+        assert!(!potentially_trustworthy(&"foo".parse().unwrap()));
+        assert!(!potentially_trustworthy(&"foo:443".parse().unwrap()));
+        assert!(!potentially_trustworthy(&"foo:123".parse().unwrap()));
+        assert!(!potentially_trustworthy(&"http://foo".parse().unwrap()));
+        assert!(potentially_trustworthy(&"127.0.0.1".parse().unwrap()));
+        assert!(!potentially_trustworthy(&"128.0.0.1".parse().unwrap()));
+        assert!(potentially_trustworthy(
+            &"http://127.0.0.1".parse().unwrap()
+        ));
+        assert!(potentially_trustworthy(
+            &"http://localhost.".parse().unwrap()
+        ));
+        assert!(potentially_trustworthy(
+            &"http://dev.localhost".parse().unwrap()
+        ));
+        assert!(potentially_trustworthy(
+            &"https://localhost".parse().unwrap()
+        ));
+        assert!(potentially_trustworthy(&"https://bar".parse().unwrap()));
+        assert!(potentially_trustworthy(
+            &"https://bar:8080".parse().unwrap()
+        ));
+        assert!(potentially_trustworthy(&"http://[::1]".parse().unwrap()));
     }
 }

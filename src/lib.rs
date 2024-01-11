@@ -118,7 +118,7 @@ fn potentially_trustworthy(uri: &Uri) -> bool {
     use std::str::FromStr;
     if uri.scheme() == Some(&Scheme::HTTPS) {
         // We don't accept wss:// or file:// schemes, because they seem sketchy in this context
-        // (also I think they don't even parse as uris according to `http`)
+        // (also I think they don't even parse as uris according to the `http` library)
         return true;
     }
     let mut host = match uri.host() {
@@ -131,16 +131,19 @@ fn potentially_trustworthy(uri: &Uri) -> bool {
     {
         return true;
     }
-    if host.starts_with("[") && host.ends_with("]") {
-        host = host.strip_prefix("[").unwrap().strip_suffix("]").unwrap();
-    }
     if let Ok(i) = std::net::Ipv4Addr::from_str(host) {
         let local_net = cidr::Ipv4Cidr::from_str("127.0.0.0/8").unwrap();
         if local_net.contains(&i) {
             return true;
         }
     }
-    if let Ok(i) = std::net::Ipv6Addr::from_str(host) {
+
+    let ip6_host = if host.starts_with('[') && host.ends_with(']') {
+        host.strip_prefix('[').unwrap().strip_suffix(']').unwrap()
+    } else {
+        return false
+    };
+    if let Ok(i) = std::net::Ipv6Addr::from_str(ip6_host) {
         let local_net = cidr::Ipv6Cidr::from_str("::1/128").unwrap();
         if local_net.contains(&i) {
             return true;

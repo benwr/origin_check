@@ -1,3 +1,44 @@
+//! A minimal `Tower` middleware layer for mitigating CSRF attacks.
+//!
+//! Examines the `Origin` or `Referer` header of incoming requests, and compares
+//! it to the target `Host` and `URI`.
+//!
+//! ```
+//! let (mock_service, _) = tower_test::mock::spawn::<http::Request<()>, ()>();
+//! let csrf_proof_service = origin_check::OriginCheck::new(mock_service);
+//! ```
+//!
+//! # IMPORTANT NOTES:
+//!
+//! This crate makes several assumptions that *must all be true for it to be a good
+//! choice for you:*
+//!
+//! 1. Your site is accessed exclusively in "secure contexts", like over `https` or
+//!    on `localhost`.
+//! 2. State changes are *never performed* in response to `GET` or `HEAD` requests.
+//!    Such requests are _always allowed_ by this service, regardless of CSRF
+//!    indicators.
+//! 3. All other requests _should fail_ if the hostname and port of the `Origin` or
+//!    `Referer` does not _exactly_ match the `Host`. This means that you cannot,
+//!    e.g., send POST requests from one subdomain to another, or from one port to
+//!    another.
+//! 4. Your users' browsers will set the `Origin` or `Referer` header on
+//!    non-`GET`/-`HEAD` requests, when those requests are initiated by your site.
+//!    In order to ensure this, be careful that the `Referrer-Policy` for your site
+//!    is not set to `no-referrer`.
+//!
+//! You probably want to set `SameSite=Strict` or `SameSite=Lax` on any
+//! authentication cookies, as additional protection against CSRF.
+//!
+//! You likely also want to set `X-Frame-Options: DENY` for your site by default,
+//! to prevent clickjacking, which is a distinct but related problem to CSRF.
+//!
+//! # Features
+//!
+//! * `tower-layer`: optional, enabled by default. Adds an impl for `tower_layer::Layer`.
+
+#![warn(missing_docs)]
+
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
@@ -7,8 +48,8 @@ use http::{method::Method, uri::Scheme, Request, Uri};
 use pin_project::pin_project;
 use tower::{BoxError, Service};
 
-/// Middleware that checks that a request's origin is allowed to use the underlying service. If it
-/// is, pass the request unmodified to the inner service. If it isn't, return an error.
+/// Tower middleware service that verifies that a request's origin matches the target host on
+/// non-GET, non-HEAD requests.
 #[derive(Debug, Clone)]
 pub struct OriginCheck<S> {
     inner: S,
@@ -17,17 +58,25 @@ pub struct OriginCheck<S> {
 /// Error returned when the origin is not allowed.
 #[derive(Debug, Clone, Eq, Ord, PartialOrd, PartialEq, Hash)]
 pub enum OriginCheckError {
+    /// The specified header is required, but was missing.
     MissingHeader(String),
+    /// There were multiple headers when there should only have been one
     TooManyOfHeader(String, Vec<Vec<u8>>),
+    /// This header was invalid (e.g. was not valid utf-8)
     InvalidHeader(Vec<u8>),
+    /// The given string was not a valid URI, though it should have been
     InvalidUri(String),
+    /// The specified origin did not match the host
     DisallowedOrigin(String),
 }
 
+/// Future type produced by the OriginCheck Service.
 #[derive(Debug, Clone, Eq, Ord, PartialOrd, PartialEq, Hash)]
 #[pin_project(project = ResponseFutureProj)]
 pub enum ResponseFuture<F: Future> {
+    /// The request can proceed as normal
     Ok(#[pin] F),
+    /// The request failed an origin check
     Err(OriginCheckError),
 }
 
@@ -85,10 +134,7 @@ fn get_exactly_one_uri_header<B>(
 ) -> Result<Uri, OriginCheckError> {
     let headers = request.headers().get_all(label).iter().collect::<Vec<_>>();
     if headers.len() > 1 {
-        let headers = headers
-            .into_iter()
-            .map(|h| h.as_bytes().to_vec())
-            .collect();
+        let headers = headers.into_iter().map(|h| h.as_bytes().to_vec()).collect();
         return Err(OriginCheckError::TooManyOfHeader(
             label.to_string(),
             headers,
@@ -100,11 +146,7 @@ fn get_exactly_one_uri_header<B>(
     };
     let header_str = match header.to_str() {
         Ok(s) => s,
-        Err(_) => {
-            return Err(OriginCheckError::InvalidHeader(
-                header.as_bytes().to_vec(),
-            ))
-        }
+        Err(_) => return Err(OriginCheckError::InvalidHeader(header.as_bytes().to_vec())),
     };
     let uri = match header_str.parse::<Uri>() {
         Err(_) => {
@@ -184,7 +226,9 @@ fn validate_request<B>(request: &Request<B>) -> Result<(), OriginCheckError> {
     let (target_host, target_port) = match (host_header_uri, request.uri().host()) {
         (Ok(h), None) if h.host().is_some() => (h.host().unwrap().to_string(), h.port_u16()),
         (Ok(_), None) => return Err(OriginCheckError::MissingHeader("Host".to_string())),
-        (Err(OriginCheckError::MissingHeader(_)), Some(u)) => (u.to_string(), request.uri().port_u16()),
+        (Err(OriginCheckError::MissingHeader(_)), Some(u)) => {
+            (u.to_string(), request.uri().port_u16())
+        }
         (Err(e), _) => return Err(e),
         (Ok(h), Some(u)) if h.host() == Some(u) && h.port() == request.uri().port() => {
             (u.to_string(), h.port_u16())
@@ -230,6 +274,7 @@ where
 }
 
 #[cfg(feature = "tower-layer")]
+/// A dummy layer type, allowing use of the OriginCheck as a `tower-layer::Layer`.
 pub struct OriginCheckLayer {
     _priv: (),
 }

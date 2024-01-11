@@ -100,19 +100,6 @@ fn get_exactly_one_uri_header<B>(
     Ok(uri)
 }
 
-fn is_valid_origin_header(uri: &Uri) -> bool {
-    match (uri.scheme(), uri.authority()) {
-        (Some(scheme), Some(authority)) => {
-            let minimal_origin = match authority.port_u16() {
-                None => format!("{}://{}/", scheme, authority.host()),
-                Some(p) => format!("{}://{}:{}/", scheme, authority.host(), p),
-            };
-            uri.to_string() == minimal_origin
-        }
-        _ => false,
-    }
-}
-
 fn potentially_trustworthy(uri: &Uri) -> bool {
     // https://w3c.github.io/webappsec-secure-contexts/#is-origin-trustworthy
     use std::str::FromStr;
@@ -121,7 +108,7 @@ fn potentially_trustworthy(uri: &Uri) -> bool {
         // (also I think they don't even parse as uris according to the `http` library)
         return true;
     }
-    let mut host = match uri.host() {
+    let host = match uri.host() {
         None => return false,
         Some(h) => h,
     };
@@ -160,12 +147,7 @@ fn validate_request<B>(request: &Request<B>) -> Result<(), OriginCheckError> {
     let origin = match get_exactly_one_uri_header(request, "Origin") {
         Err(OriginCheckError::MissingHeader(_)) => None,
         Err(e) => return Err(e),
-        Ok(o) => {
-            if !is_valid_origin_header(&o) {
-                return Err(OriginCheckError::InvalidUri(o.to_string()));
-            }
-            Some(o)
-        }
+        Ok(o) => { Some(o) }
     };
     let origin_or_referer = match origin {
         Some(o) => o,

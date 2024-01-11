@@ -1,6 +1,6 @@
 [package]
 name = "origin_check"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Ben Weinstein-Raun <b@w-r.me>"]
 edition = "2021"
 description = "Tower middleware that checks the Origin and Referer, as a minimal CSRF mitigation"

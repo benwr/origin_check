@@ -12,3 +12,6 @@ http = "1"
 pin-project = "1"
 tower = "0.4"
 tower-layer = { version = "0.3", optional = true }
+
+[features]
+default = ["tower-layer"]

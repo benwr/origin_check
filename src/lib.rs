@@ -3,7 +3,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use http::{method::Method, uri::Scheme, HeaderValue, Request, Uri};
+use http::{method::Method, uri::Scheme, Request, Uri};
 use pin_project::pin_project;
 use tower::{BoxError, Service};
 
@@ -18,8 +18,8 @@ pub struct OriginCheck<S> {
 #[derive(Debug, Clone, Eq, Ord, PartialOrd, PartialEq, Hash)]
 pub enum OriginCheckError {
     MissingHeader(String),
-    TooManyOfHeader(String, Vec<HeaderValue>),
-    InvalidHeader(HeaderValue),
+    TooManyOfHeader(String, Vec<Vec<u8>>),
+    InvalidHeader(Vec<u8>),
     InvalidUri(String),
     DisallowedOrigin(String),
 }
@@ -43,8 +43,16 @@ impl fmt::Display for OriginCheckError {
         use OriginCheckError::*;
         let errstr = match self {
             MissingHeader(h) => format!("Missing header: {h}"),
-            TooManyOfHeader(h, rs) => format!("Too many instances of header {h}: {:?}", rs),
-            InvalidHeader(r) => format!("Invalid origin: {:?}", r),
+            TooManyOfHeader(h, rs) => {
+                let values: Vec<_> = rs
+                    .iter()
+                    .map(|bs| String::from_utf8_lossy(bs).into_owned())
+                    .collect();
+                format!("Too many instances of header {h}: {:?}", values)
+            }
+            InvalidHeader(r) => {
+                format!("Invalid header: {}", String::from_utf8_lossy(r))
+            }
             InvalidUri(u) => format!("Invalid uri: {u}"),
             DisallowedOrigin(r) => format!("Disallowed origin: {:?}", r),
         };
@@ -77,7 +85,10 @@ fn get_exactly_one_uri_header<B>(
 ) -> Result<Uri, OriginCheckError> {
     let headers = request.headers().get_all(label).iter().collect::<Vec<_>>();
     if headers.len() > 1 {
-        let headers = headers.into_iter().cloned().collect();
+        let headers = headers
+            .into_iter()
+            .map(|h| h.as_bytes().to_vec())
+            .collect();
         return Err(OriginCheckError::TooManyOfHeader(
             label.to_string(),
             headers,
@@ -89,7 +100,11 @@ fn get_exactly_one_uri_header<B>(
     };
     let header_str = match header.to_str() {
         Ok(s) => s,
-        Err(_) => return Err(OriginCheckError::InvalidHeader((*header).clone())),
+        Err(_) => {
+            return Err(OriginCheckError::InvalidHeader(
+                header.as_bytes().to_vec(),
+            ))
+        }
     };
     let uri = match header_str.parse::<Uri>() {
         Err(_) => {
@@ -128,7 +143,7 @@ fn potentially_trustworthy(uri: &Uri) -> bool {
     let ip6_host = if host.starts_with('[') && host.ends_with(']') {
         host.strip_prefix('[').unwrap().strip_suffix(']').unwrap()
     } else {
-        return false
+        return false;
     };
     if let Ok(i) = std::net::Ipv6Addr::from_str(ip6_host) {
         let local_net = cidr::Ipv6Cidr::from_str("::1/128").unwrap();
@@ -147,33 +162,43 @@ fn validate_request<B>(request: &Request<B>) -> Result<(), OriginCheckError> {
     let origin = match get_exactly_one_uri_header(request, "Origin") {
         Err(OriginCheckError::MissingHeader(_)) => None,
         Err(e) => return Err(e),
-        Ok(o) => { Some(o) }
+        Ok(o) => Some(o),
     };
     let origin_or_referer = match origin {
         Some(o) => o,
-        None => match get_exactly_one_uri_header(request, "Referer") {
-            Err(e) => return Err(e),
-            Ok(r) => r,
-        },
-    };
-    let host_uri = match get_exactly_one_uri_header(request, "Host") {
-        Err(e) => return Err(e),
-        Ok(h) => h,
+        None => get_exactly_one_uri_header(request, "Referer")?,
     };
 
-    let host_str = match host_uri.host() {
-        None => return Err(OriginCheckError::MissingHeader("Host".to_string())),
-        Some(host) => host,
-    };
+    // The host part of the URI can come from multiple places:
+    //  - in HTTP 1, a `Host` header is required, which contains the hostname and port.
+    //  - but also, the path can be an "absolute uri" including the target host. At least
+    //      in HTTP 1.1, this is only for proxies, but must be handled by the server.
+    //  - in HTTP/2, the Host header is optional, and instead encoded in the :authority
+    //     pseudo-header. I believe that http services will then put this information in the `uri`
+    //     field, or in the `Host` header, but I'm not confident that they're consistent about it.
+    //
+    //  So, we need to be able to get a host (and optional port) from *at least one* of these
+    //  places. If we get it from multiple places, they must all match.
 
-    if let Some(uri_host) = request.uri().host() {
-        if uri_host != host_str {
-            return Err(OriginCheckError::InvalidUri(uri_host.to_string()));
+    let host_header_uri = get_exactly_one_uri_header(request, "Host");
+    let (target_host, target_port) = match (host_header_uri, request.uri().host()) {
+        (Ok(h), None) if h.host().is_some() => (h.host().unwrap().to_string(), h.port_u16()),
+        (Ok(_), None) => return Err(OriginCheckError::MissingHeader("Host".to_string())),
+        (Err(OriginCheckError::MissingHeader(_)), Some(u)) => (u.to_string(), request.uri().port_u16()),
+        (Err(e), _) => return Err(e),
+        (Ok(h), Some(u)) if h.host() == Some(u) && h.port() == request.uri().port() => {
+            (u.to_string(), h.port_u16())
         }
-    }
+        (Ok(h), Some(u)) => {
+            return Err(OriginCheckError::TooManyOfHeader(
+                "Host".to_string(),
+                vec![h.to_string().as_bytes().to_vec(), u.as_bytes().to_vec()],
+            ))
+        }
+    };
 
-    if origin_or_referer.host() == Some(host_str)
-        && origin_or_referer.port() == host_uri.port()
+    if origin_or_referer.host() == Some(&target_host)
+        && origin_or_referer.port_u16() == target_port
         && potentially_trustworthy(&origin_or_referer)
     {
         Ok(())
@@ -206,7 +231,7 @@ where
 
 #[cfg(feature = "tower-layer")]
 pub struct OriginCheckLayer {
-    _priv: ()
+    _priv: (),
 }
 
 #[cfg(feature = "tower-layer")]

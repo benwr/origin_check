@@ -148,7 +148,7 @@ fn validate_request<B>(request: &Request<B>) -> Result<(), OriginCheckError> {
     if [Method::GET, Method::HEAD].contains(request.method()) {
         return Ok(());
     }
-    let origin = match get_exactly_one_uri_header(&request, "Origin") {
+    let origin = match get_exactly_one_uri_header(request, "Origin") {
         Err(OriginCheckError::MissingHeader(_)) => None,
         Err(e) => return Err(e),
         Ok(o) => {
@@ -160,12 +160,12 @@ fn validate_request<B>(request: &Request<B>) -> Result<(), OriginCheckError> {
     };
     let origin_or_referer = match origin {
         Some(o) => o,
-        None => match get_exactly_one_uri_header(&request, "Referer") {
+        None => match get_exactly_one_uri_header(request, "Referer") {
             Err(e) => return Err(e),
             Ok(r) => r,
         },
     };
-    let host_uri = match get_exactly_one_uri_header(&request, "Host") {
+    let host_uri = match get_exactly_one_uri_header(request, "Host") {
         Err(e) => return Err(e),
         Ok(h) => h,
     };

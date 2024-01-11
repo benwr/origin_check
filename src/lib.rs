@@ -219,6 +219,20 @@ where
     }
 }
 
+#[cfg(feature = "tower-layer")]
+pub struct OriginCheckLayer {
+    _priv: ()
+}
+
+#[cfg(feature = "tower-layer")]
+impl<S> tower_layer::Layer<S> for OriginCheckLayer {
+    type Service = OriginCheck<S>;
+
+    fn layer(&self, service: S) -> Self::Service {
+        OriginCheck::new(service)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;

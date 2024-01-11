@@ -275,6 +275,7 @@ where
 
 #[cfg(feature = "tower-layer")]
 /// A dummy layer type, allowing use of the OriginCheck as a `tower-layer::Layer`.
+#[derive(Debug, Clone, Default)]
 pub struct OriginCheckLayer {
     _priv: (),
 }

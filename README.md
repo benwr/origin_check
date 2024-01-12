@@ -1,8 +1,8 @@
 # origin\_check
 
-![Crates.io Version](https://img.shields.io/crates/v/origin_check)
-![docs.rs](https://img.shields.io/docsrs/origin_check)
-![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/benwr/origin_check/rust.yml)
+[![Crates.io Version](https://img.shields.io/crates/v/origin_check)](https://crates.io/crates/origin_check)
+![docs.rs](https://img.shields.io/docsrs/origin_check)(https://docs.rs/origin_check/latest/origin_check/)
+[![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/benwr/origin_check/rust.yml)](https://github.com/benwr/origin_check)
 
 
 A minimal `Tower` middleware layer for mitigating CSRF attacks.

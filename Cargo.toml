@@ -4,6 +4,10 @@ version = "0.2.1"
 authors = ["Ben Weinstein-Raun <b@w-r.me>"]
 edition = "2021"
 description = "A minimal Tower middleware layer for mitigating CSRF attacks"
+documentation = "https://docs.rs/origin_check/latest/origin_check/"
+repository = "https://github.com/benwr/origin_check"
+keywords = ["csrf", "tower", "middleware", "http"]
+categories = ["network-programming", "web-programming", "web-programming::http-server"]
 license = "CC0-1.0 OR Apache-2.0"
 
 [dependencies]

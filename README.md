@@ -39,4 +39,3 @@ authentication cookies, as additional protection against CSRF.
 
 You likely also want to set `X-Frame-Options: DENY` for your site by default,
 to prevent clickjacking, which is a distinct but related problem to CSRF.
-A minimal Tower middleware layer for mitigating CSRF attacks.

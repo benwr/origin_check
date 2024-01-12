@@ -1,7 +1,7 @@
 # origin\_check
 
-![docs.rs](https://img.shields.io/docsrs/origin_check)
 ![Crates.io Version](https://img.shields.io/crates/v/origin_check)
+![docs.rs](https://img.shields.io/docsrs/origin_check)
 ![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/benwr/origin_check/rust.yml)
 
 

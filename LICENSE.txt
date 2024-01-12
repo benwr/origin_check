@@ -1,0 +1,5 @@
+This software was written by Ben Weinstein-Raun in 2024.
+Anyone may use it for any purpose, under the terms of the CC0-1.0
+License or the Apache 2.0 License, at the licensee's option. Both
+licenses are distributed with the software, in the files
+LICENSE-CC0.txt and LICENSE-APACHE.txt.

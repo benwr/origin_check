@@ -140,7 +140,7 @@ fn get_exactly_one_uri_header<B>(
             headers,
         ));
     }
-    let header = match headers.get(0) {
+    let header = match headers.first() {
         None => return Err(OriginCheckError::MissingHeader(label.to_string())),
         Some(r) => r,
     };

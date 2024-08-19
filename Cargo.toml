@@ -14,7 +14,7 @@ license = "CC0-1.0 OR Apache-2.0"
 cidr = "0.2"
 http = "1"
 pin-project = "1"
-tower = "0.4"
+tower = "0.5"
 tower-layer = { version = "0.3", optional = true }
 
 [dev-dependencies]

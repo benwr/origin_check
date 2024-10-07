@@ -11,7 +11,7 @@ categories = ["network-programming", "web-programming", "web-programming::http-s
 license = "CC0-1.0 OR Apache-2.0"
 
 [dependencies]
-cidr = "0.2"
+cidr = "0.3"
 http = "1"
 pin-project = "1"
 tower = "0.4"
